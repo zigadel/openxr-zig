@@ -126,6 +126,7 @@ pub fn writeIdentifier(writer: anytype, id: []const u8) !void {
         try w.print("@\"{s}\"", .{id});
     } else {
         // Non-primitive: use fmtId to make a valid Zig identifier.
+        // Zig 0.16+ requires {f} here to call the value's format() method.
         try w.print("{f}", .{std.zig.fmtId(id)});
     }
 }

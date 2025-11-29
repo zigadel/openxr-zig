@@ -150,7 +150,7 @@ fn Renderer(comptime WriterType: type) type {
         const WriteError = WriterType.Error;
         // id_renderer.renderFmt uses std.fmt.bufPrint, which can fail with error.NoSpaceLeft.
         // For BufferWriter we won’t actually hit this at runtime, but the type system needs it.
-        const RenderTypeInfoError = WriteError || error{OutOfMemory} || error{NoSpaceLeft};
+        const RenderTypeInfoError = WriteError || error{ OutOfMemory, NoSpaceLeft };
 
         const BitflagName = struct {
             /// Name without FlagBits, so XrSurfaceTransformFlagBitsKHR
@@ -1216,7 +1216,9 @@ fn Renderer(comptime WriterType: type) type {
             }
 
             if (command.success_codes.len > 1) {
-                if (command.return_type.* != .name or !mem.eql(u8, command.return_type.name, "XrResult")) {
+                if (command.return_type.* != .name or
+                    !mem.eql(u8, command.return_type.name, "XrResult"))
+                {
                     return error.InvalidRegistry;
                 }
 
@@ -1225,7 +1227,9 @@ fn Renderer(comptime WriterType: type) type {
                     .return_value_type = command.return_type.*,
                     .origin = .inner_return_value,
                 });
-            } else if (command.success_codes.len == 1 and !mem.eql(u8, command.success_codes[0], "XR_SUCCESS")) {
+            } else if (command.success_codes.len == 1 and
+                !mem.eql(u8, command.success_codes[0], "XR_SUCCESS"))
+            {
                 return error.InvalidRegistry;
             }
 
