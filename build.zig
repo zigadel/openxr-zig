@@ -1,84 +1,57 @@
 const std = @import("std");
-const xrgen = @import("generator/index.zig");
-
-const XrGenerateStep = xrgen.XrGenerateStep;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const xr_xml_path: ?[]const u8 =
-        b.option([]const u8, "registry", "Override the path to the OpenXR registry");
-    const test_step = b.step("test", "Run all the tests");
 
-    // using the package manager, this artifact can be obtained by the user
-    // through `b.dependency(<name in build.zig.zon>, .{}).artifact("openxr-zig-generator")`.
-    // with that, the user need only `.addArg("path/to/xr.xml")`, and then obtain
-    // a file source to the generated code with `.addOutputArg("xr.zig")`
+    // Optional override: -Dregistry=/abs/path/to/xr.xml
+    const registry_opt = b.option([]const u8, "registry", "Override path to OpenXR XML registry");
+
+    // Default to the xr.xml shipped in this repo (examples/xr.xml),
+    // which is known to be compatible with this generator.
+    const spec_path: []const u8 = registry_opt orelse b.pathFromRoot("examples/xr.xml");
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Generator CLI: openxr-zig-generator
+    // ─────────────────────────────────────────────────────────────────────
+    const gen_mod = b.createModule(.{
+        .root_source_file = b.path("generator/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const generator_exe = b.addExecutable(.{
         .name = "openxr-zig-generator",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("generator/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = gen_mod,
     });
     b.installArtifact(generator_exe);
 
-    // or they can skip all that, and just make sure to pass
-    // `.registry = "path/to/xr.xml"` to `b.dependency`,
-    // and then obtain the module directly via `.module("openxr-zig")`.
-    if (xr_xml_path) |path| {
-        const generate_cmd = b.addRunArtifact(generator_exe);
+    // Run generator at build time: openxr-zig-generator <xr.xml> <out.zig>
+    const gen_cmd = b.addRunArtifact(generator_exe);
+    gen_cmd.addArg(spec_path);
+    const xr_zig = gen_cmd.addOutputFileArg("xr.zig");
 
-        if (!std.fs.path.isAbsolute(path)) {
-            @panic(
-                "Make sure to assign an absolute path to the `registry` option " ++
-                    "(see: std.Build.pathFromRoot).\n",
-            );
-        }
-        generate_cmd.addArg(path);
+    // Expose the generated bindings as a module named "openxr".
+    const xr_mod = b.addModule("openxr", .{
+        .root_source_file = xr_zig,
+    });
+    _ = xr_mod; // currently only used by dependents (via b.dependency(...).module("openxr"))
 
-        const xr_zig = generate_cmd.addOutputFileArg("xr.zig");
-        const xr_zig_module = b.addModule("openxr", .{
-            // NOTE: Module.CreateOptions still uses .root_source_file.
-            .root_source_file = xr_zig,
-        });
+    // ─────────────────────────────────────────────────────────────────────
+    // Tests for the generator itself
+    // ─────────────────────────────────────────────────────────────────────
+    const test_step = b.step("test", "Run generator tests");
 
-        // Also install xr.zig, if passed.
-        const xr_zig_install_step = b.addInstallFile(xr_zig, "src/xr.zig");
-        b.getInstallStep().dependOn(&xr_zig_install_step.step);
-
-        // example
-        const example_exe = b.addExecutable(.{
-            .name = "example",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("examples/test.zig"),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        b.installArtifact(example_exe);
-        example_exe.linkLibC();
-        example_exe.linkSystemLibrary("openxr_loader");
-
-        // Wire generated bindings into the example.
-        example_exe.root_module.addImport("openxr", xr_zig_module);
-
-        const example_run_cmd = b.addRunArtifact(example_exe);
-        example_run_cmd.step.dependOn(b.getInstallStep());
-
-        const example_run_step = b.step("run-example", "Run the example");
-        example_run_step.dependOn(&example_run_cmd.step);
-    }
-
-    // remainder of the script is for examples/testing
     const test_mod = b.createModule(.{
         .root_source_file = b.path("generator/index.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const test_target = b.addTest(.{
+
+    const test_art = b.addTest(.{
         .root_module = test_mod,
     });
-    test_step.dependOn(&b.addRunArtifact(test_target).step);
+
+    const run_tests = b.addRunArtifact(test_art);
+    test_step.dependOn(&run_tests.step);
 }
