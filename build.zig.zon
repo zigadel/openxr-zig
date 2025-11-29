@@ -1,0 +1,11 @@
+.{
+    .name = .openxr,
+    .fingerprint = 0xa6eefe16ec13a22a,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.16.0-dev.1470+32dc46aae",
+    .paths = .{
+        "build.zig",
+        "README.md",
+        "src",
+    },
+}
