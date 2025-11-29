@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
         generate_cmd.addArg(path);
 
         const xr_zig = generate_cmd.addOutputFileArg("xr.zig");
-        const xr_zig_module = b.addModule("openxr-zig", .{
+        const xr_zig_module = b.addModule("openxr", .{
             // NOTE: Module.CreateOptions still uses .root_source_file.
             .root_source_file = xr_zig,
         });
