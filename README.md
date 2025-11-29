@@ -1,61 +1,196 @@
 # openxr-zig
 
-A OpenXR binding generator for Zig.
-The generator is almost a verbatim copy of Snektron's [vulkan-zig][vulkan-zig], and all the hard work was done there.
+OpenXR bindings for Zig, generated from the official XML registry.
 
-## Overview
+**Goal:** Take `xr.xml` → produce `xr.zig` → give you a clean, type-safe OpenXR API that feels like Zig, not C.
 
-openxr-zig attempts to provide a better experience to programming OpenXR applications in Zig, by providing features such as integration of openxr errors with Zig's error system, function pointer loading, renaming fields to standard Zig style, better bitfield handling, turning out parameters into return values and more.
+---
 
-openxr-zig is automatically tested daily against the latest xr.xml and zig, and supports xr.xml from version 1.x.163.
+## 1. What this library is
 
-### Zig versions
+- **OpenXR** is the standard API for VR/AR (“XR”) runtimes.
+- `openxr-zig`:
+  - Reads the official `xr.xml` registry from Khronos.
+  - Generates a Zig source file `xr.zig`.
+  - Exposes OpenXR via idiomatic Zig types, errors, and wrappers.
 
-openxr-zig aims to be always compatible with the ever-changing Zig master branch (however, development may lag a few days behind). Sometimes, the Zig master branch breaks a bunch of functionality however, which may make the latest version openxr-zig incompatible with older releases of Zig. Versions compatible with older versions of zig are marked with the tag `zig-<version>`.
+You do **not** edit the generated file. Regenerate it when you change `xr.xml` or update this tool.
 
-## Differences from Spec
-* `XR_SESSION_STATE_LOSS_PENDING` results are treated as errorcodes, contrary to the spec. This way, the API wrapper returns them as part of the error union, so that the actual return type can be allocated more usefully.
+The generator design is heavily inspired by Snektron’s [`vulkan-zig`](https://github.com/Snektron/vulkan-zig).
 
-## Features
-### CLI-interface
-A CLI-interface is provided to generate xr.zig from the [OpenXR XML registry](https://github.com/KhronosGroup/OpenXR-Docs/blob/master/xml), which is built by default when invoking `zig build` in the project root. To generate xr.zig, simply invoke the program as follows:
+---
+
+## 2. Quick start (one-off generation)
+
+This is the simplest path, even if you’re new to Zig.
+
+### Step 1: Get `xr.xml`
+
+From the OpenXR SDK or the Khronos repo (for example, `OpenXR-Docs/xml/xr.xml`).  
+Place it in your project:
+
+```text
+deps/openxr/xr.xml
 ```
-$ zig-cache/bin/openxr-zig-generator path/to/xr.xml output/path/to/xr.zig
-```
-This reads the xml file, parses its contents, renders the OpenXR bindings, and formats file, before writing the result to the output path. While the intended usage of openxr-zig is through direct generation from build.zig (see below), the CLI-interface can be used for one-off generation and vendoring the result.
 
-### Generation from build.zig
-OpenXR bindings can be generated from the OpenXR XML registry at compile time with build.zig, by using the provided OpenXR generation step:
+### Step 2: Build the generator
+
+Clone this repo and build:
+
+```bash
+zig build
+```
+
+This produces:
+
+```text
+zig-out/bin/openxr-zig-generator
+```
+
+### Step 3: Generate `xr.zig`
+
+From your project root:
+
+```bash
+/path/to/openxr-zig/zig-out/bin/openxr-zig-generator     deps/openxr/xr.xml     src/xr.zig
+```
+
+Now you have `src/xr.zig` with all generated types and functions.
+
+### Step 4: Use it in your Zig code
+
+`src/main.zig`:
+
 ```zig
-const xrgen = @import("openxr-zig/generator/index.zig");
+const std = @import("std");
+const xr = @import("xr"); // generated file
 
-pub fn build(b: *Builder) void {
-    ...
-    const exe = b.addExecutable("my-executable", "src/main.zig");
-
-    // Create a step that generates xr.zig (stored in zig-cache) from the provided openxr registry.
-    const gen = xrgen.XrGenerateStep.init(b, "path/to/xr.xml", "xr.zig");
-    exe.step.dependOn(&gen.step);
-
-    // Add the generated file as package to the final executable
-    exe.addPackagePath("openxr", gen.full_out_path);
+pub fn main() !void {
+    std.debug.print("OpenXR spec version: {d}.{d}.{d}
+", .{
+        xr.MAJOR_VERSION,
+        xr.MINOR_VERSION,
+        xr.PATCH_VERSION,
+    });
 }
 ```
-This reads xr.xml, parses its contents, and renders the OpenXR bindings to "xr.zig", which is then formatted and placed in `zig-cache`. The resulting file can then be added to an executable by using `addPackagePath`.
 
-### Function & field renaming
-Functions and fields are renamed to be more or less in line with [Zig's standard library style](https://ziglang.org/documentation/master/#Style-Guide):
-* The xr prefix is removed everywhere
-  * Structs like `XrInstanceCreateInfo` are renamed to `InstanceCreateInfo`.
-  * Handles like `XrSwapchainKHR` are renamed to `SwapchainKHR` (note that the tag is retained in caps).
-  * Functions like `xrCreateInstance` are generated as `createInstance` as wrapper and as `PfnCreateInstance` as function pointer.
-  * API constants like `XR_WHOLE_SIZE` retain screaming snake case, and are generates as `WHOLE_SIZE`.
-* The type name is stripped from enumeration fields and bitflags, and they are generated in (lower) snake case. For example, `XR_ACTION_TYPE_BOOLEAN_INPUT` is generated as just `boolean_input`. Note that author tags are also generated to lower case: `XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR` is translated to `application_main_khr`.
-* Container fields and function parameter names are generated in (lower) snake case in a similar manner: `viewConfigurationType` becomes `view_configuration_type`.
-* Any name which is either an illegal Zig name or a reserved identifier is rendered using `@"name"` syntax. For example, `XR_ENVIRONMENT_BLEND_MODE_OPAQUE` is translated to `@"opaque"`.
+Build and run:
 
-### Function pointers & Wrappers
-openxr-zig provides no integration for statically linking libopenxr, and these symbols are not generated at all. Instead, openxr functions are to be loaded dynamically. For each OpenXR function, a function pointer type is generated using the exact parameters and return types as defined by the OpenXR specification:
+```bash
+zig build run
+```
+
+At this point you have OpenXR bindings in Zig. From here, you follow the usual OpenXR flow (instance, system, session, etc.), but using Zig types instead of raw C.
+
+---
+
+## 3. Using as a Zig dependency (build-time generation)
+
+If you want `xr.zig` generated automatically during `zig build`:
+
+### 3.1 `build.zig.zon`
+
+```zig
+.{
+    .name = "my-xr-app",
+    .version = "0.0.1",
+    .dependencies = .{
+        .openxr_zig = .{
+            .url = "https://github.com/zigadel/openxr-zig/archive/refs/heads/main.tar.gz",
+            .hash = "TODO: fill after `zig fetch`",
+        },
+    },
+}
+```
+
+### 3.2 `build.zig`
+
+```zig
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const exe = b.addExecutable(.{
+        .name = "my-xr-app",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Tell openxr-zig where your registry XML is.
+    const xr_dep = b.dependency("openxr_zig", .{
+        .registry = "deps/openxr/xr.xml",
+    });
+
+    const xr_mod = xr_dep.module("openxr-zig");
+    exe.root_module.addImport("xr", xr_mod);
+
+    b.installArtifact(exe);
+}
+```
+
+Then in your code:
+
+```zig
+const xr = @import("xr");
+```
+
+You don’t call the generator yourself; `zig build` wires it into the build graph.
+
+---
+
+## 4. API shape
+
+The generator reshapes the raw C API into something Zig-friendly.
+
+### 4.1 Naming
+
+- Types:
+  - `XrInstanceCreateInfo` → `InstanceCreateInfo`
+  - `XrSwapchainKHR` → `SwapchainKHR` (author/tag suffixes like `KHR` are preserved)
+- Functions:
+  - `xrCreateInstance` → `createInstance` (wrapper)
+  - `xrCreateInstance` function pointer → `PfnCreateInstance`
+- Enum / flag values:
+  - `XR_ACTION_TYPE_BOOLEAN_INPUT` → `boolean_input`
+  - `XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR` → `application_main_khr`
+  - `XR_ENVIRONMENT_BLEND_MODE_OPAQUE` → `@"opaque"` (escaped identifier)
+- Struct fields / parameters:
+  - `viewConfigurationType` → `view_configuration_type`
+
+All of this follows Zig’s standard style (snake_case, lower-case enums, `@"..."` escapes).
+
+### 4.2 Errors and return values
+
+C-style:
+
+```c
+XrResult xrCreateInstance(
+    const XrInstanceCreateInfo* createInfo,
+    XrInstance* instance
+);
+```
+
+Generated Zig wrapper (shape, not exact code):
+
+```zig
+pub fn createInstance(self: Self, info: InstanceCreateInfo) !Instance { ... }
+```
+
+Rules:
+
+- Non-const, non-optional single-item pointers are treated as **out parameters** and become return values.
+- `XrResult` success vs error codes:
+  - Success: function returns the value(s) you care about.
+  - Error: mapped into a Zig error set (`error.OutOfMemory`, `error.InstanceLost`, etc.).
+- If a command returns multiple out values, a small struct is generated to hold them.
+
+### 4.3 Function pointers and dispatch tables
+
+The generator emits function pointer types that exactly match the C signatures:
 
 ```zig
 pub const PfnCreateInstance = fn (
@@ -64,187 +199,88 @@ pub const PfnCreateInstance = fn (
 ) callconv(openxr_call_conv) Result;
 ```
 
-fn getProcAddr(instance: xr.Instance, name: [*:0]const u8) xr.PfnVoidFunction {
-    var out: xr.PfnVoidFunction = undefined;
-    _ = c.xrGetInstanceProcAddr(instance, name, &out);
-    return out;
-}
+You then build small “dispatch” structs that hold only function pointers, and mix in wrappers:
 
-For each function, a wrapper is generated into one of three structs:
-* BaseWrapper. This contains wrappers for functions which are loaded by `xrGetInstanceProcAddr` without an instance, such as `xrCreateInstance`, `xrEnumerateApiLayerProperties`, etc.
-* InstanceWrapper. This contains wrappers for functions which are otherwise loaded by `xrGetInstanceProcAddr`.
-
-Each wrapper struct is to be used as a mixin on a struct containing **just** function pointers as members:
 ```zig
-const xr = @import("openxr");
+const xr = @import("xr");
+
 const BaseDispatch = struct {
     xrCreateInstance: xr.PfnCreateInstance,
     usingnamespace xr.BaseWrapper(@This());
 };
 ```
-The wrapper struct then provides wrapper functions for each function pointer in the dispatch struct:
-```zig
-pub const BaseWrapper(comptime Self: type) type {
-    return struct {
-        pub fn createInstance(
-            self: Self,
-            create_info: InstanceCreateInfo,
-        ) error{
-            OutOfMemory,
-            LimitReached,
-            InstanceLost,
-            RuntimeFailure,
-            InitializationFailed,
-            ApiVersionUnsupported,
-            ApiLayerNotPresent,
-            ExtensionNotPresent,
-            ValidationFailure,
-            NameInvalid,
-            Unknown,
-        }!Instance {
-            var instance: Instance = undefined;
-            const result = self.xrCreateInstance(
-                &create_info,
-                &instance,
-            );
-            switch (result) {
-                .success => {},
-                .error_out_of_memory => return error.OutOfMemory,
-                .error_limit_reached => return error.LimitReached,
-                .error_instance_lost => return error.InstanceLost,
-                .error_runtime_failure => return error.RuntimeFailure,
-                .error_initialization_failed => return error.InitializationFailed,
-                .error_api_version_unsupported => return error.ApiVersionUnsupported,
-                .error_api_layer_not_present => return error.ApiLayerNotPresent,
-                .error_extension_not_present => return error.ExtensionNotPresent,
-                .error_validation_failure => return error.ValidationFailure,
-                .error_name_invalid => return error.NameInvalid,
-                else => return error.Unknown,
-            }
-            return instance;
-        }
 
-        ...
-    }
-}
-```
-Wrappers are generated according to the following rules:
-* The return type is determined from the original return type and the parameters.
-  * Any non-const, non-optional single-item pointer is interpreted as an out parameter.
-  * If a command returns a non-error `XrResult` other than `XR_SUCCESS` it is also returned.
-  * If there are multiple return values selected, an additional struct is generated. The original call's return value is called `return_value`, `XrResult` is named `result`, and the out parameters are called the same. They are generated in this order.
-* Any const non-optional single-item pointer is interpreted as an in-parameter. For these, one level of indirection is removed so that create info structure pointers can now be passed as values, enabling the ability to use struct literals for these parameters.
-* Error codes are translated into Zig errors.
-* As of yet, there is no specific handling of enumeration style commands or other commands which accept slices.
+Wrappers are grouped into:
 
-Furthermore, each wrapper contains a function to load each function pointer member when passed `PfnGetInstanceProcAddr`, which attempts to load each member as function pointer and casts it to the appropriate type. These functions are loaded literally, and any wrongly named member or member with a wrong function pointer type will result in problems.
-* For `BaseWrapper`, this function has signature `fn load(loader: PfnGetInstanceProcAddr) !Self`.
-* For `InstanceWrapper`, this function has signature `fn load(instance: Instance, loader: PfnGetInstanceProcAddr) !Self`.
+- `BaseWrapper` – functions that don’t need an `Instance` (e.g. `xrCreateInstance`, enumeration calls).
+- `InstanceWrapper` – functions that do need an `Instance`.
 
-#### `openxr-loader`
-
-By linking against `openxr_loader` and including `openxr.h`, `xrGetInstanceProcAddr` can be obtained and wrapped like so:
+Each wrapper type exposes a `load` helper that uses `xrGetInstanceProcAddr` to fill the function pointer table:
 
 ```zig
-fn getProcAddr(instance: xr.Instance, name: [*:0]const u8) !xr.PfnVoidFunction {
-    var out: xr.PfnVoidFunction = undefined;
-    const result = c.xrGetInstanceProcAddr(instance, name, &out);
-    return switch (result) {
-        .success => out,
-        .error_handle_invalid => error.HandleInvalid,
-        .error_instance_lost => error.InstanceLost,
-        .error_runtime_failure => error.RuntimeFailure,
-        .error_out_of_memory => error.OutOfMemory,
-        .error_function_unsupported => error.FunctionUnsupported,
-        .error_validation_failure => error.ValidationFailure,
-        else => error.Unknown,
-    }
-}
-
-const BaseDispatch = struct {
-    xrCreateInstance: xr.PfnCreateInstance,
-    usingnamespace xr.BaseWrapper(@This());
-};
-
-...
-
-const xrb = try BaseDispatch.load(getProcAddr);
+const base = try BaseDispatch.load(getProcAddr); // you implement getProcAddr
+const instance = try base.createInstance(create_info);
 ```
 
-### Bitflags
-Packed structs of bools are used for bit flags in openxr-zig, instead of both a `FlagBits` and `Flags64` variant. Places where either of these variants are used are both replaced by this packed struct instead. This means that even in places where just one flag would normally be accepted, the packed struct is accepted. The programmer is responsible for only enabling a single bit.
+For `xrGetInstanceProcAddr`, you typically use `openxr_loader` and wrap it in a Zig function that returns `xr.PfnVoidFunction`.
 
-Each bit is defaulted to `false`, and the first `bool` is aligned to guarantee the overal alignment
-of each Flags type to guarantee ABI compatibility when passing bitfields through structs:
+---
+
+## 5. Bitflags, handles, structs, pointers
+
+### 5.1 Bitflags
+
+Bitflags are modeled as packed structs of `bool`, with a mixin for set operations:
+
 ```zig
 pub const ViewStateFlags = packed struct {
     orientation_valid_bit: bool align(@alignOf(Flags64)) = false,
     position_valid_bit: bool = false,
     orientation_tracked_bit: bool = false,
     position_tracked_bit: bool = false,
-    _reserved_bit_4: bool = false,
-    _reserved_bit_5: bool = false,
-    ...
+    // ...
     pub usingnamespace FlagsMixin(ViewStateFlags);
 };
 ```
-Note that on function call ABI boundaries, this alignment trick is not sufficient. Instead, the flags
-are reinterpreted as an integer which is passed instead. Each flags type is augmented by a mixin which provides `IntType`, an integer which represents the flags on function ABI boundaries. This mixin also provides some common set operation on bitflags:
+
+The `FlagsMixin` for each flag type provides:
+
+- `IntType` – integer representation used at ABI boundaries (e.g. `Flags64`).
+- `toInt` / `fromInt`
+- `merge`, `intersect`, `subtract`, `complement`
+- `contains`
+
+On the wire, flags are passed as integers. In Zig code, you work with strongly-typed flag structs.
+
+### 5.2 Handles
+
+Handles are non-exhaustive enums over integers:
+
 ```zig
-pub fn FlagsMixin(comptime FlagsType: type) type {
-    return struct {
-        pub const IntType = Flags64;
-
-        // Return the integer representation of these flags
-        pub fn toInt(self: FlagsType) IntType {...}
-
-        // Turn an integer representation back into a flags type
-        pub fn fromInt(flags: IntType) FlagsType { ... }
-
-        // Return the set-union of `lhs` and `rhs.
-        pub fn merge(lhs: FlagsType, rhs: FlagsType) FlagsType { ... }
-
-        // Return the set-intersection of `lhs` and `rhs`.
-        pub fn intersect(lhs: FlagsType, rhs: FlagsType) FlagsType { ... }
-
-        // Return the set-complement of `lhs` and `rhs`. Note: this also inverses reserved bits.
-        pub fn complement(self: FlagsType) FlagsType { ... }
-
-        // Return the set-subtraction of `lhs` and `rhs`: All fields set in `rhs` are cleared in `lhs`.
-        pub fn subtract(lhs: FlagsType, rhs: FlagsType) FlagsType { ... }
-
-        // Returns whether all bits set in `rhs` are also set in `lhs`.
-        pub fn contains(lhs: FlagsType, rhs: FlagsType) bool { ... }
-    };
-}
+pub const Instance = extern enum(usize) { null_handle = 0, _ };
 ```
 
-### Handles
-Handles are generated to a non-exhaustive enum, backed by a `u64` for non-dispatchable handles and `usize` for dispatchable ones:
-```zig
-const Instance = extern enum(usize) { null_handle = 0, _ };
-```
-This means that handles are type-safe even when compiling for a 32-bit target.
+- Non-dispatchable handles typically use `u64`.
+- Dispatchable handles use `usize`.
 
-### Structs
-Defaults are generated for certain fields of structs:
-* `type` is defaulted to the appropriate value.
-* `next` is defaulted to `null`.
-* for math primitives (`Vector*`, `Color*`, `Quaternionf`, `Offset*`, `Extent*`, `Posef`, `Rect*`), all fields are zero-initialized by default.
-* No other fields have default values.
+This gives you type safety without changing the ABI.
 
-All structs contain an `empty()` function that returns an instance with only `type` and `next` set, which can be used whenever OpenXR requires an uninitialized (but typed) structure to output into.
+### 5.3 Struct defaults
+
+Generated structs get sensible defaults:
+
+- `type` → correct `StructureType` variant.
+- `next` → `null`.
+- Common math types (`Vector*`, `Color*`, `Quaternionf`, `Offset*`, `Extent*`, `Posef`, `Rect*`) → all fields zero-initialized.
+- No other fields defaulted.
+
+Each struct includes an `empty()` helper that sets just `type` and `next`, for “output-only” structs:
 
 ```zig
 pub const InstanceCreateInfo = extern struct {
     type: StructureType = .instance_create_info,
-    next: ?*const c_void = null,
-    create_flags: InstanceCreateFlags,
-    application_info: ApplicationInfo,
-    enabled_api_layer_count: u32,
-    enabled_api_layer_names: [*]const [*:0]const u8,
-    enabled_extension_count: u32,
-    enabled_extension_names: [*]const [*:0]const u8,
+    next: ?*const anyopaque = null,
+    // ...
     pub fn empty() @This() {
         var value: @This() = undefined;
         value.type = .instance_create_info;
@@ -254,17 +290,63 @@ pub const InstanceCreateInfo = extern struct {
 };
 ```
 
-### Pointer types
-Pointer types in both commands (wrapped and function pointers) and struct fields are augmented with the following information, where available in the registry:
-* Pointer optional-ness.
-* Pointer const-ness.
-* Pointer size: Either single-item, null-terminated or many-items.
+### 5.4 Pointer metadata
 
-Some of these are detected wrong, most notably `next`, which has been overriden to be optional in all cases.
+Where the registry provides it, pointer types are annotated with:
 
-## Limitations
-* Currently, the self-hosted version of Zig's cache-hash API is not yet ready for usage, which means that the bindings are regenerated every time an executable is built.
+- Optional vs non-optional.
+- Const vs non-const.
+- Single-item / many-items / null-terminated.
 
-* openxr-zig has as of yet no functionality for selecting feature levels and extensions when generating bindings. This is because when an extension is promoted to OpenXR core, its fields and commands are renamed to lose the extensions author tag. This leads to inconsistencies when only items from up to a certain feature level is included, as these promoted items then need to re-gain a tag.
+The generator also corrects `next` to be treated as optional everywhere (it’s effectively optional in practice).
 
-[vulkan-zig]: https://github.com/Snektron/vulkan-zig
+---
+
+## 6. Differences from the spec
+
+One intentional behavioral difference:
+
+- `XR_SESSION_STATE_LOSS_PENDING` is treated as an **error** instead of a “success with special meaning”.  
+  This forces you to handle it via the error union and keeps normal return types cleaner.
+
+Other changes (naming, struct defaults, bitflag modeling, etc.) are mechanical and follow Zig conventions.
+
+---
+
+## 7. Compatibility and limitations
+
+- **Zig version**  
+  This repo targets a specific Zig dev snapshot or release. If you update your Zig compiler and builds start failing:
+  - Update `openxr-zig` to a newer commit/tag, or
+  - Pin your Zig toolchain version for this project.
+
+- **Registry version**  
+  The generator is designed for modern OpenXR 1.x `xr.xml`. If Khronos significantly changes the schema, you may need an update here.
+
+- **Feature / extension selection**  
+  Currently, bindings are generated for the **full** registry.  
+  Selecting “only these features/extensions” is non-trivial (because promoted extensions are renamed in core) and is not implemented yet.
+
+- **Regeneration**  
+  When used as a dependency with build-time generation, the bindings may be regenerated whenever the build graph decides it is necessary.  
+  If you want a fully static API:
+  - Generate `src/xr.zig` once.
+  - Commit it.
+  - Stop invoking the generator from `build.zig`.
+
+---
+
+## 8. Who this is for
+
+- Engine / framework authors who want a Zig-native OpenXR layer.
+- Game / XR developers comfortable working on top of raw OpenXR concepts.
+- Zig users (often on nightly/dev builds) who don’t want to maintain bindings by hand.
+
+If you just need a few OpenXR calls from C/C++, the standard `openxr_loader` + `openxr.h` is usually simpler.
+
+---
+
+## 9. Credits
+
+- Generator approach is inspired by [Snektron’s `vulkan-zig`](https://github.com/Snektron/vulkan-zig).
+- OpenXR, `xr.xml`, and the reference loader are provided by the Khronos OpenXR working group.
